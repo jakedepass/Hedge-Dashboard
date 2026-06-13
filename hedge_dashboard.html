@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket × Crypto/Equity Hedge Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #ffffff; --bg2: #f5f5f3; --bg3: #efefec;
+  --text: #1a1a18; --text2: #6b6b67; --text3: #9a9a96;
+  --border: rgba(0,0,0,0.12); --border2: rgba(0,0,0,0.22);
+  --blue: #185FA5; --blue-bg: #E6F1FB; --blue-text: #042C53;
+  --green: #1D9E75; --green-bg: #E1F5EE; --green-text: #085041;
+  --red: #D85A30; --red-bg: #FAECE7; --red-text: #4A1B0C;
+  --amber-bg: #FAEEDA; --amber-text: #854F0B;
+  --radius: 10px; --radius-sm: 6px;
+}
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg3); color: var(--text); font-size: 14px; line-height: 1.5; }
+.app { max-width: 960px; margin: 0 auto; padding: 1.5rem 1rem; }
+
+/* Header */
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.header-title { font-size: 11px; font-weight: 500; color: var(--text2); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 4px; }
+.header-h1 { font-size: 20px; font-weight: 500; }
+.header-right { display: flex; align-items: center; gap: 10px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.status-text { font-size: 12px; color: var(--text2); }
+
+/* Account bar */
+.account-bar { display: none; flex-wrap: wrap; gap: 16px; align-items: center; margin-bottom: 1rem; padding: 10px 14px; background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); }
+.account-bar .ab-label { font-size: 11px; font-weight: 500; color: var(--text2); text-transform: uppercase; letter-spacing: .06em; }
+.account-bar .ab-item { font-size: 13px; color: var(--text2); }
+.account-bar .ab-item strong { color: var(--text); }
+
+/* Grid */
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 1.25rem; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 600px) { .grid4 { grid-template-columns: repeat(2,1fr); } .grid2 { grid-template-columns: 1fr; } }
+
+/* Cards */
+.card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 1rem 1.25rem; }
+.metric { background: var(--bg2); border-radius: var(--radius-sm); padding: 1rem; }
+.metric .label { font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+.metric .value { font-size: 22px; font-weight: 500; }
+
+/* Tags */
+.tag { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 4px; }
+.tag-blue { background: var(--blue-bg); color: var(--blue-text); }
+.tag-green { background: var(--green-bg); color: var(--green-text); }
+.tag-red { background: var(--red-bg); color: var(--red-text); }
+.tag-amber { background: var(--amber-bg); color: var(--amber-text); }
+
+/* Section label */
+.section-label { font-size: 11px; font-weight: 500; color: var(--text2); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 10px; }
+
+/* Tabs */
+.tab-row { display: flex; gap: 4px; margin-bottom: 14px; flex-wrap: wrap; }
+.tab { font-size: 13px; padding: 5px 14px; border-radius: var(--radius-sm); cursor: pointer; border: 0.5px solid var(--border); color: var(--text2); background: transparent; }
+.tab.active { background: var(--blue-bg); color: var(--blue-text); border-color: var(--blue); font-weight: 500; }
+
+/* Buttons */
+button { cursor: pointer; font-family: inherit; }
+.btn { font-size: 13px; padding: 7px 16px; border-radius: var(--radius-sm); border: 0.5px solid var(--border2); background: transparent; color: var(--text); }
+.btn:hover { background: var(--bg2); }
+.btn.primary { background: var(--blue); color: #fff; border: none; }
+.btn.primary:hover { opacity: 0.9; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Events */
+.event-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 0.5px solid var(--border); cursor: pointer; transition: background 0.1s; }
+.event-row:last-child { border-bottom: none; }
+.event-row:hover, .event-row.selected { background: var(--blue-bg); margin: 0 -1.25rem; padding: 10px 1.25rem; border-radius: var(--radius-sm); }
+.prob-bar { height: 4px; background: var(--border); border-radius: 2px; flex: 1; overflow: hidden; }
+.prob-fill { height: 100%; background: var(--blue); border-radius: 2px; }
+
+/* Sliders */
+.slider-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.slider-row label { font-size: 12px; color: var(--text2); width: 150px; flex-shrink: 0; }
+.slider-row input[type=range] { flex: 1; }
+.slider-row .val { font-size: 13px; font-weight: 500; min-width: 56px; text-align: right; }
+
+/* Result boxes */
+.result-box { border-left: 3px solid; padding: 10px 14px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-bottom: 8px; }
+.result-box.pos { border-color: var(--green); background: var(--green-bg); color: var(--green-text); }
+.result-box.neg { border-color: var(--red); background: var(--red-bg); color: var(--red-text); }
+.result-box.neutral { border-color: var(--blue); background: var(--blue-bg); color: var(--blue-text); }
+.result-box .rb-title { font-size: 12px; font-weight: 500; margin-bottom: 2px; }
+.result-box .rb-body { font-size: 12px; }
+
+/* Spinner */
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* AI output */
+.ai-output { font-size: 14px; line-height: 1.75; white-space: pre-wrap; }
+.ai-btn-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1rem; }
+
+/* Legend */
+.legend { display: flex; gap: 16px; margin-bottom: 8px; flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text2); }
+.legend-swatch { width: 20px; height: 3px; border-radius: 2px; }
+
+/* Portfolio table */
+.pf-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pf-table th { text-align: left; padding: 6px 8px; color: var(--text2); border-bottom: 1px solid var(--border); font-weight: 500; }
+.pf-table th.r, .pf-table td.r { text-align: right; }
+.pf-table td { padding: 6px 8px; border-bottom: 0.5px solid var(--border); }
+.pf-table tr:last-child td { border-bottom: none; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="header">
+    <div>
+      <div class="header-title">Hedge Intelligence Dashboard</div>
+      <div class="header-h1">Polymarket × Crypto / Equities</div>
+    </div>
+    <div class="header-right">
+      <span class="status-dot" id="dot"></span>
+      <span class="status-text" id="status-text">Ready</span>
+      <button class="btn primary" id="scan-btn" onclick="runFullScan()">↗ Run scan</button>
+    </div>
+  </div>
+
+  <!-- Live account bar — hidden until /api/account responds -->
+  <div class="account-bar" id="account-bar">
+    <span class="ab-label">Alpaca Paper</span>
+    <span class="ab-item">Equity: <strong id="acc-equity">—</strong></span>
+    <span class="ab-item">Cash: <strong id="acc-cash">—</strong></span>
+    <span class="ab-item">Buying Power: <strong id="acc-bp">—</strong></span>
+    <span class="ab-item" id="acc-status-wrap" style="margin-left:auto;"></span>
+  </div>
+
+  <div class="grid4">
+    <div class="metric"><div class="label">Markets scanned</div><div class="value" id="m-count">—</div></div>
+    <div class="metric"><div class="label">Hedge opportunities</div><div class="value" id="m-opps">—</div></div>
+    <div class="metric"><div class="label">Best edge (est.)</div><div class="value" id="m-edge">—</div></div>
+    <div class="metric"><div class="label">Top pattern score</div><div class="value" id="m-corr">—</div></div>
+  </div>
+
+  <div class="tab-row">
+    <button class="tab active" onclick="switchTab('events',this)">Events & assets</button>
+    <button class="tab" onclick="switchTab('hedge',this)">Hedge calculator</button>
+    <button class="tab" onclick="switchTab('portfolio',this)">Portfolio</button>
+    <button class="tab" onclick="switchTab('backtest',this)">Backtest</button>
+    <button class="tab" onclick="switchTab('ai',this)">AI analysis</button>
+  </div>
+
+  <!-- EVENTS TAB -->
+  <div id="tab-events">
+    <div class="grid2">
+      <div class="card">
+        <div class="section-label">Live Polymarket opportunities</div>
+        <div id="event-list"><div style="color:var(--text2);">Click <strong>↗ Run scan</strong> to load live opportunities</div></div>
+      </div>
+      <div class="card">
+        <div class="section-label">Asset correlation detail</div>
+        <div id="corr-panel"><div style="color:var(--text2);">Select an event to see correlated assets and hedge details</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HEDGE TAB -->
+  <div id="tab-hedge" style="display:none;">
+    <div class="grid2">
+      <div class="card">
+        <div class="section-label">Hedge ratio calculator</div>
+        <div class="slider-row"><label>Polymarket position ($)</label><input type="range" min="100" max="50000" step="100" value="5000" id="pm-size" oninput="calcHedge()"><span class="val" id="v-pm">$5,000</span></div>
+        <div class="slider-row"><label>Asset correlation (ρ)</label><input type="range" min="-100" max="100" step="1" value="72" id="corr-val" oninput="calcHedge()"><span class="val" id="v-corr">0.72</span></div>
+        <div class="slider-row"><label>Asset volatility (σ)</label><input type="range" min="1" max="120" step="1" value="35" id="asset-vol" oninput="calcHedge()"><span class="val" id="v-vol">35%</span></div>
+        <div class="slider-row"><label>PM contract vol (σ)</label><input type="range" min="1" max="80" step="1" value="22" id="pm-vol" oninput="calcHedge()"><span class="val" id="v-pmvol">22%</span></div>
+        <div class="slider-row"><label>Event probability</label><input type="range" min="1" max="99" step="1" value="62" id="pm-prob" oninput="calcHedge()"><span class="val" id="v-prob">62%</span></div>
+      </div>
+      <div class="card">
+        <div class="section-label">Position sizing & payoff</div>
+        <div id="hedge-output"></div>
+        <div style="margin-top:1rem;">
+          <div class="legend">
+            <div class="legend-item"><div class="legend-swatch" style="background:#D85A30;"></div>Unhedged PM</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:#1D9E75;"></div>Hedged</div>
+          </div>
+          <div style="position:relative;width:100%;height:200px;"><canvas id="payoffChart" role="img" aria-label="Payoff diagram">Payoff comparison chart</canvas></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PORTFOLIO TAB -->
+  <div id="tab-portfolio" style="display:none;">
+    <div class="card">
+      <div id="portfolio-content" style="color:var(--text2);padding:1rem 0;">
+        Click <strong>Portfolio</strong> tab to load live positions and trade P&amp;L.
+      </div>
+    </div>
+  </div>
+
+  <!-- BACKTEST TAB -->
+  <div id="tab-backtest" style="display:none;">
+    <div class="card" style="margin-bottom:12px;">
+      <div class="section-label">Backtest parameters</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+        <div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:4px;">Asset</div>
+          <select id="bt-asset" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);">
+            <option value="BTC">BTC</option><option value="ETH">ETH</option><option value="SPY">SPY (S&amp;P500)</option><option value="QQQ">QQQ (Nasdaq)</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:4px;">Strategy</div>
+          <select id="bt-strat" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);">
+            <option value="hedge">Long asset + PM hedge</option><option value="arb">PM implied prob arb</option><option value="corr">Correlation fade</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:4px;">Hedge ratio</div>
+          <select id="bt-ratio" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);">
+            <option value="0.25">25%</option><option value="0.5" selected>50%</option><option value="0.75">75% (full delta)</option>
+          </select>
+        </div>
+        <button class="btn primary" onclick="runBacktest()">Run backtest ↗</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="legend" id="bt-legend" style="margin-bottom:8px;"></div>
+      <div style="position:relative;width:100%;height:260px;margin-bottom:1rem;"><canvas id="btChart" role="img" aria-label="Backtest cumulative P&L">Backtest P&amp;L chart</canvas></div>
+      <div class="grid4" id="bt-metrics"></div>
+    </div>
+  </div>
+
+  <!-- AI TAB -->
+  <div id="tab-ai" style="display:none;">
+    <div class="card">
+      <div class="section-label">AI strategy analysis</div>
+      <div class="ai-btn-grid">
+        <button class="btn" onclick="askAI('Analyze prediction market and crypto hedge opportunities. Rank the main strategy types (cross-platform arb, event-driven hedge, correlation fade) by risk-adjusted edge right now, with specific numbers.')">Rank strategies ↗</button>
+        <button class="btn" onclick="askAI('What are the biggest risks in a Polymarket + BTC/ETH hedge strategy, and how should a trader size positions to control them? Be specific with numbers and scenarios.')">Risk analysis ↗</button>
+        <button class="btn" onclick="askAI('Explain the optimal hedge ratio formula for a binary prediction market event correlated with a crypto asset. Walk through a concrete worked example with BTC and a hypothetical election-related market.')">Hedge ratio math ↗</button>
+        <button class="btn" onclick="askAI('What are the current best Polymarket event categories that have historically shown strong correlation with BTC, ETH, or equity ETFs? Explain the mechanism for each.')">Best event categories ↗</button>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:12px;">Requires ANTHROPIC_API_KEY — calls the Anthropic API directly from your browser.</div>
+      <div id="ai-panel" style="min-height:100px;"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const SERVER = 'http://localhost:5050';
+
+let payoffChart = null;
+let btChartObj  = null;
+let liveOpps    = [];   // current scan results
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function defaultVol(ticker) {
+  const etfs    = ['SPY','QQQ','XBI','XLE','XLF','XLU','TLT','ETHA','FXI'];
+  const highVol = ['NVDA','TSLA','MRNA','BIIB','MSTR','COIN','DJT'];
+  const t = (ticker || '').toUpperCase();
+  if (etfs.includes(t))    return 0.17;
+  if (highVol.includes(t)) return 0.50;
+  return 0.30;
+}
+
+function fmtUSD(n, decimals=0) {
+  return '$' + (n||0).toLocaleString(undefined, {minimumFractionDigits:decimals, maximumFractionDigits:decimals});
+}
+
+function fmtVol(n) {
+  if (n >= 1e6) return '$' + (n/1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return '$' + Math.round(n/1e3) + 'k';
+  return '$' + Math.round(n);
+}
+
+function quickEdge(opp) {
+  const vol  = defaultVol(opp.ticker);
+  const corr = opp.total_score || 0;
+  const prob = opp.pm_prob || 0.5;
+  return (Math.abs(corr) * vol * Math.abs(prob - 0.5) * 0.6) - 0.018;
+}
+
+// ---------------------------------------------------------------------------
+// Status
+// ---------------------------------------------------------------------------
+
+function setStatus(text, loading) {
+  document.getElementById('status-text').textContent = text;
+  document.getElementById('dot').style.background = loading ? '#EF9F27' : '#1D9E75';
+}
+
+// ---------------------------------------------------------------------------
+// Tab switching
+// ---------------------------------------------------------------------------
+
+function switchTab(name, el) {
+  ['events','hedge','portfolio','backtest','ai'].forEach(t => {
+    document.getElementById('tab-'+t).style.display = t === name ? '' : 'none';
+  });
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  if (name === 'hedge')     calcHedge();
+  if (name === 'backtest')  runBacktest();
+  if (name === 'portfolio') loadPortfolio();
+}
+
+// ---------------------------------------------------------------------------
+// Account bar
+// ---------------------------------------------------------------------------
+
+async function loadAccount() {
+  try {
+    const r    = await fetch(`${SERVER}/api/account`);
+    const data = await r.json();
+    if (data.error) return;
+    const bar = document.getElementById('account-bar');
+    bar.style.display = 'flex';
+    document.getElementById('acc-equity').textContent = fmtUSD(data.equity);
+    document.getElementById('acc-cash').textContent   = fmtUSD(data.cash);
+    document.getElementById('acc-bp').textContent     = fmtUSD(data.buying_power);
+    document.getElementById('acc-status-wrap').innerHTML =
+      `<span class="tag tag-green" style="font-size:10px;">${data.status || 'ACTIVE'}</span>`;
+  } catch(_) { /* server not running — hide silently */ }
+}
+
+// ---------------------------------------------------------------------------
+// Main scan
+// ---------------------------------------------------------------------------
+
+async function runFullScan() {
+  const btn = document.getElementById('scan-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Scanning...';
+  setStatus('Fetching live Polymarket data...', true);
+
+  try {
+    // 1. Market count (fast — used for the top metric only)
+    const pmResp = await fetch(`${SERVER}/api/polymarket?limit=200`);
+    if (!pmResp.ok) throw new Error('server.py not reachable — is it running on port 5050?');
+    const pmData = await pmResp.json();
+    document.getElementById('m-count').textContent = (pmData.count || 0).toLocaleString();
+
+    setStatus('Matching events to stocks...', true);
+
+    // 2. Opportunities from event_stock_mapper (~5-10s)
+    const scanResp = await fetch(`${SERVER}/api/scan?limit=200`);
+    const scanData = await scanResp.json();
+    if (scanData.error) throw new Error(scanData.error);
+
+    liveOpps = scanData.opportunities || [];
+    document.getElementById('m-opps').textContent = liveOpps.length;
+
+    if (liveOpps.length > 0) {
+      const topScore = Math.max(...liveOpps.map(o => o.total_score || 0));
+      document.getElementById('m-corr').textContent = topScore.toFixed(2);
+
+      const edges    = liveOpps.map(o => quickEdge(o));
+      const bestEdge = Math.max(...edges);
+      const edgeEl   = document.getElementById('m-edge');
+      edgeEl.textContent = (bestEdge >= 0 ? '+' : '') + '$' + Math.abs(bestEdge).toFixed(3);
+      edgeEl.style.color = bestEdge >= 0 ? 'var(--green)' : 'var(--red)';
+    }
+
+    renderEventList(liveOpps);
+    setStatus(`Last scan: ${new Date().toLocaleTimeString()}`, false);
+  } catch(e) {
+    setStatus('Error: ' + e.message, false);
+    document.getElementById('dot').style.background = '#D85A30';
+    document.getElementById('event-list').innerHTML =
+      `<div class="result-box neg"><div class="rb-title">Scan failed</div><div class="rb-body">${e.message}</div></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '↗ Run scan';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Event list
+// ---------------------------------------------------------------------------
+
+function renderEventList(opps) {
+  const el = document.getElementById('event-list');
+  if (!opps.length) {
+    el.innerHTML = '<div style="color:var(--text2);">No opportunities matched. Try lowering min-vol in the scan.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  opps.forEach(opp => {
+    const row   = document.createElement('div');
+    row.className = 'event-row';
+    const score = opp.total_score || 0;
+    const tag   = score >= 0.85 ? 'tag-green' : score >= 0.70 ? 'tag-amber' : 'tag-blue';
+    row.innerHTML = `
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${opp.event_title}">${opp.event_title}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+          <div class="prob-bar"><div class="prob-fill" style="width:${(opp.pm_prob||0)*100}%"></div></div>
+          <span style="font-size:12px;color:var(--text2);white-space:nowrap;">${Math.round((opp.pm_prob||0)*100)}%</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+        <span class="tag tag-blue">${opp.ticker}</span>
+        <span class="tag ${tag}">${score.toFixed(2)}</span>
+      </div>`;
+    row.onclick = () => {
+      document.querySelectorAll('.event-row').forEach(r => r.classList.remove('selected'));
+      row.classList.add('selected');
+      showCorrPanel(opp);
+    };
+    el.appendChild(row);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Correlation panel
+// ---------------------------------------------------------------------------
+
+function showCorrPanel(opp) {
+  const panel   = document.getElementById('corr-panel');
+  const vol     = defaultVol(opp.ticker);
+  const edge    = quickEdge(opp);
+  const isLong  = opp.direction === 'long';
+
+  panel.innerHTML = `
+    <div style="margin-bottom:12px;">
+      <div style="font-size:13px;font-weight:500;margin-bottom:6px;">${opp.event_title}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <span class="tag tag-blue">${opp.ticker}</span>
+        <span class="tag tag-blue">${opp.category}</span>
+        <span class="tag ${isLong ? 'tag-green' : 'tag-red'}">${isLong ? 'Long hedge' : 'Short hedge'}</span>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+      <div class="metric"><div class="label">PM probability</div><div class="value">${Math.round((opp.pm_prob||0)*100)}%</div></div>
+      <div class="metric"><div class="label">PM volume</div><div class="value">${fmtVol(opp.pm_volume||0)}</div></div>
+      <div class="metric"><div class="label">Pattern score</div><div class="value">${(opp.total_score||0).toFixed(2)}</div></div>
+      <div class="metric"><div class="label">Est. edge</div>
+        <div class="value" style="color:${edge>=0?'var(--green)':'var(--red)'}">${edge>=0?'+':''}$${Math.abs(edge).toFixed(3)}</div>
+      </div>
+    </div>
+    <div class="result-box ${edge >= 0 ? 'pos' : 'neutral'}">
+      <div class="rb-title">${opp.hedge_action}</div>
+      <div class="rb-body">${opp.note}</div>
+    </div>
+    ${opp.pm_url ? `<div style="margin-top:8px;"><a href="${opp.pm_url}" target="_blank" rel="noopener" style="font-size:12px;color:var(--blue);">View on Polymarket →</a></div>` : ''}`;
+
+  // Pre-populate hedge calculator sliders with this event's values
+  document.getElementById('corr-val').value  = Math.round((opp.total_score||0.72) * 100);
+  document.getElementById('asset-vol').value = Math.round(vol * 100);
+  document.getElementById('pm-prob').value   = Math.round((opp.pm_prob||0.5) * 100);
+  calcHedge();
+}
+
+// ---------------------------------------------------------------------------
+// Hedge calculator
+// ---------------------------------------------------------------------------
+
+function calcHedge() {
+  const pmSize   = +document.getElementById('pm-size').value;
+  const corr     = +document.getElementById('corr-val').value / 100;
+  const assetVol = +document.getElementById('asset-vol').value / 100;
+  const pmVol    = +document.getElementById('pm-vol').value / 100;
+  const prob     = +document.getElementById('pm-prob').value / 100;
+
+  document.getElementById('v-pm').textContent    = '$' + pmSize.toLocaleString();
+  document.getElementById('v-corr').textContent  = corr.toFixed(2);
+  document.getElementById('v-vol').textContent   = Math.round(assetVol*100) + '%';
+  document.getElementById('v-pmvol').textContent = Math.round(pmVol*100) + '%';
+  document.getElementById('v-prob').textContent  = Math.round(prob*100) + '%';
+
+  const hr       = Math.abs(corr) * (pmVol / assetVol);
+  const assetPos = Math.round(pmSize * hr);
+  const netExp   = Math.round(pmSize * (1 - hr * Math.abs(corr)));
+  const fee      = Math.round(pmSize * 0.02);
+  const expPnl   = Math.round(pmSize * (prob - 0.5) * 0.8 - fee);
+  const worst    = Math.round(-(pmSize * (1 - prob) + assetPos * assetVol * 0.5));
+
+  document.getElementById('hedge-output').innerHTML = `
+    <div class="result-box neutral" style="margin-bottom:10px;">
+      <div class="rb-title">Optimal hedge ratio: ${hr.toFixed(3)}x</div>
+      <div class="rb-body">${corr>0?'Long':'Short'} ${fmtUSD(assetPos)} in asset per ${fmtUSD(pmSize)} PM position</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <div class="metric"><div class="label">Asset position</div><div class="value">${fmtUSD(assetPos)}</div></div>
+      <div class="metric"><div class="label">Net exposure</div><div class="value">${fmtUSD(netExp)}</div></div>
+      <div class="metric"><div class="label">Expected P&amp;L</div><div class="value" style="color:${expPnl>=0?'var(--green)':'var(--red)'}">${expPnl>=0?'+':''}${fmtUSD(expPnl)}</div></div>
+      <div class="metric"><div class="label">Worst-case loss</div><div class="value" style="color:var(--red)">${fmtUSD(worst)}</div></div>
+    </div>`;
+
+  drawPayoff(pmSize, prob, hr, assetVol, corr);
+}
+
+function drawPayoff(pmSize, prob, hr, assetVol, corr) {
+  const ctx = document.getElementById('payoffChart').getContext('2d');
+  if (payoffChart) payoffChart.destroy();
+  const labels = [], unhedged = [], hedged = [];
+  for (let p = 0; p <= 100; p += 5) {
+    const pv = p / 100;
+    const assetReturn = (pv - prob) * assetVol * 2 * corr;
+    const pmPnl       = (pv > 0.5 ? pmSize * pv : -pmSize * (1-pv)) * 0.4;
+    const assetPnl    = pmSize * hr * assetReturn;
+    labels.push(p + '%');
+    unhedged.push(Math.round(pmPnl));
+    hedged.push(Math.round(pmPnl + assetPnl));
+  }
+  payoffChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [
+      { label:'Unhedged PM', data:unhedged, borderColor:'#D85A30', borderWidth:1.5, pointRadius:0, borderDash:[4,3], fill:false },
+      { label:'Hedged',      data:hedged,   borderColor:'#1D9E75', borderWidth:2,   pointRadius:0, fill:false }
+    ]},
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:false } },
+      scales:{
+        x:{ ticks:{ font:{size:10}, maxTicksLimit:7 }, grid:{ color:'rgba(128,128,128,0.08)' } },
+        y:{ ticks:{ font:{size:10}, callback:v=>'$'+v.toLocaleString() }, grid:{ color:'rgba(128,128,128,0.08)' } }
+      }
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio tab
+// ---------------------------------------------------------------------------
+
+async function loadPortfolio() {
+  const el = document.getElementById('portfolio-content');
+  el.innerHTML = '<span class="spinner"></span> Loading positions and trade history...';
+  try {
+    const [posResp, pnlResp] = await Promise.all([
+      fetch(`${SERVER}/api/positions`),
+      fetch(`${SERVER}/api/pnl?include_dry_runs=true`),
+    ]);
+    const posData = await posResp.json();
+    const pnlData = await pnlResp.json();
+    renderPortfolio(posData.positions || [], pnlData.trades || [], el);
+  } catch(e) {
+    el.innerHTML = `<div class="result-box neg"><div class="rb-title">Load failed</div><div class="rb-body">${e.message}</div></div>`;
+  }
+}
+
+function renderPortfolio(positions, trades, el) {
+  let html = '';
+
+  // ── Open Alpaca positions ──
+  html += `<div class="section-label" style="margin-bottom:10px;">Open Alpaca Paper Positions (${positions.length})</div>`;
+  if (positions.length > 0) {
+    const totalPnl = positions.reduce((s, p) => s + p.unrealized_pl, 0);
+    const totColor = totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
+    html += `<div style="overflow-x:auto;margin-bottom:1.5rem;">
+      <table class="pf-table">
+        <thead><tr>
+          <th>Ticker</th><th>Side</th><th class="r">Qty</th>
+          <th class="r">Entry</th><th class="r">Now</th>
+          <th class="r">Market Value</th><th class="r">Unreal P&amp;L</th><th class="r">P&amp;L %</th>
+        </tr></thead><tbody>`;
+    positions.forEach(p => {
+      const pColor = p.unrealized_pl >= 0 ? 'var(--green)' : 'var(--red)';
+      html += `<tr>
+        <td><strong>${p.ticker}</strong></td>
+        <td><span class="tag ${p.side==='long'?'tag-green':'tag-red'}">${p.side.toUpperCase()}</span></td>
+        <td class="r">${p.qty}</td>
+        <td class="r">${fmtUSD(p.entry_price, 2)}</td>
+        <td class="r">${fmtUSD(p.current_price, 2)}</td>
+        <td class="r">${fmtUSD(p.market_value, 0)}</td>
+        <td class="r" style="color:${pColor};">${p.unrealized_pl>=0?'+':''}${fmtUSD(p.unrealized_pl, 2)}</td>
+        <td class="r" style="color:${pColor};">${p.unrealized_plpc>=0?'+':''}${p.unrealized_plpc.toFixed(2)}%</td>
+      </tr>`;
+    });
+    html += `<tr style="font-weight:500;border-top:1px solid var(--border);">
+      <td colspan="6" style="color:var(--text2);">Total unrealized P&amp;L</td>
+      <td class="r" style="color:${totColor};">${totalPnl>=0?'+':''}${fmtUSD(totalPnl, 2)}</td>
+      <td></td>
+    </tr></tbody></table></div>`;
+  } else {
+    html += `<div class="result-box neutral" style="margin-bottom:1.5rem;">
+      <div class="rb-title">No open positions</div>
+      <div class="rb-body">Run <code>python paper_trader.py --execute</code> to place paper trades.</div>
+    </div>`;
+  }
+
+  // ── Trade log P&L ──
+  const totalLogPnl = trades.reduce((s, t) => s + (t.stock_pnl || 0), 0);
+  const logColor    = totalLogPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  html += `<div class="section-label" style="margin-bottom:10px;">
+    Paper Trade Log (${trades.length} trades &nbsp;·&nbsp; Total P&amp;L:
+    <span style="color:${logColor}">${totalLogPnl>=0?'+':''}${fmtUSD(totalLogPnl, 2)}</span>)
+  </div>`;
+
+  if (trades.length > 0) {
+    html += `<div style="overflow-x:auto;">
+      <table class="pf-table" style="font-size:12px;">
+        <thead><tr>
+          <th>Ticker</th><th>Side</th><th class="r">Qty</th>
+          <th class="r">Entry</th><th class="r">Now</th><th class="r">P&amp;L</th>
+          <th>PM Status</th><th>Hedge</th><th>Score</th><th>Event</th>
+        </tr></thead><tbody>`;
+    trades.forEach(t => {
+      const pColor  = (t.stock_pnl||0) >= 0 ? 'var(--green)' : 'var(--red)';
+      const pnlStr  = ((t.stock_pnl||0) >= 0 ? '+' : '') + fmtUSD(t.stock_pnl||0, 2);
+      const hClass  = t.hedge_outcome === 'CORRECT' ? 'tag-green' : t.hedge_outcome === 'WRONG' ? 'tag-red' : 'tag-blue';
+      const dryBadge = t.dry_run ? ' <span class="tag tag-amber" style="font-size:10px;">DRY</span>' : '';
+      html += `<tr>
+        <td><strong>${t.ticker}</strong>${dryBadge}</td>
+        <td><span class="tag ${t.side==='buy'?'tag-green':'tag-red'}" style="font-size:10px;">${(t.side||'').toUpperCase()}</span></td>
+        <td class="r">${t.qty}</td>
+        <td class="r">${fmtUSD(t.entry_price||0, 2)}</td>
+        <td class="r">${t.current_price ? fmtUSD(t.current_price, 2) : '—'}</td>
+        <td class="r" style="color:${pColor};">${pnlStr}</td>
+        <td style="font-size:11px;white-space:nowrap;">${t.pm_status || '—'}</td>
+        <td><span class="tag ${hClass}" style="font-size:10px;">${t.hedge_outcome || '—'}</span></td>
+        <td class="r">${(t.final_score||0).toFixed(2)}</td>
+        <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.event_title||''}">${t.event_title||''}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  } else {
+    html += `<div style="color:var(--text2);font-size:13px;">No trades in paper_trades.jsonl. Run a scan and use paper_trader.py to generate trades.</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+// ---------------------------------------------------------------------------
+// Backtest (simulation — illustrative only)
+// ---------------------------------------------------------------------------
+
+function runBacktest() {
+  const asset = document.getElementById('bt-asset').value;
+  const ratio = parseFloat(document.getElementById('bt-ratio').value);
+  const strat = document.getElementById('bt-strat').value;
+  const seed  = asset.charCodeAt(0) + strat.charCodeAt(0) + ratio * 100;
+  let rng = seed;
+  function rand() { rng = (rng * 1664525 + 1013904223) & 0xffffffff; return (rng >>> 0) / 0xffffffff; }
+
+  const n = 52;
+  let u = 10000, h = 10000;
+  const uArr=[10000], hArr=[10000], labels=['Start'];
+  for (let i=0; i<n; i++) {
+    const event   = rand()>0.48 ? 1:-1;
+    const assetMv = (rand()-0.47)*0.06;
+    const pmPnl   = event * 170 * (1 + (rand()-0.3)*0.4);
+    const assetPnl= assetMv * h * 0.4;
+    u += pmPnl;
+    h += pmPnl + assetPnl * ratio;
+    uArr.push(Math.round(u));
+    hArr.push(Math.round(h));
+    labels.push(i%4===0 ? 'W'+(i+1) : '');
+  }
+  labels[labels.length-1] = 'Now';
+
+  const uRet  = (((u/10000)-1)*100).toFixed(1);
+  const hRet  = (((h/10000)-1)*100).toFixed(1);
+  const allH  = hArr.slice(1);
+  const trough= allH.reduce((a,b,_,arr)=>{const pk=arr.slice(0,_+1).reduce((x,y)=>Math.max(x,y),-Infinity);return Math.min(a,b-pk);},0);
+  const sharpe= ((hRet-2)/15).toFixed(2);
+
+  document.getElementById('bt-legend').innerHTML = `
+    <div class="legend-item"><div class="legend-swatch" style="background:#D85A30;"></div>Unhedged PM only</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#1D9E75;"></div>PM + ${asset} hedge (${Math.round(ratio*100)}%)</div>`;
+
+  const ctx2 = document.getElementById('btChart').getContext('2d');
+  if (btChartObj) btChartObj.destroy();
+  btChartObj = new Chart(ctx2, {
+    type:'line',
+    data:{ labels, datasets:[
+      { label:'Unhedged', data:uArr, borderColor:'#D85A30', borderWidth:1.5, pointRadius:0, borderDash:[4,3], fill:false },
+      { label:'Hedged',   data:hArr, borderColor:'#1D9E75', borderWidth:2,   pointRadius:0, fill:false }
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:false } },
+      scales:{
+        x:{ ticks:{ font:{size:10} }, grid:{ color:'rgba(128,128,128,0.08)' } },
+        y:{ ticks:{ font:{size:10}, callback:v=>'$'+v.toLocaleString() }, grid:{ color:'rgba(128,128,128,0.08)' } }
+      }
+    }
+  });
+
+  document.getElementById('bt-metrics').innerHTML = `
+    <div class="metric"><div class="label">Unhedged return</div><div class="value" style="color:${uRet>0?'var(--green)':'var(--red)'}">${uRet>0?'+':''}${uRet}%</div></div>
+    <div class="metric"><div class="label">Hedged return</div><div class="value" style="color:${hRet>0?'var(--green)':'var(--red)'}">${hRet>0?'+':''}${hRet}%</div></div>
+    <div class="metric"><div class="label">Sharpe ratio</div><div class="value">${sharpe}</div></div>
+    <div class="metric"><div class="label">Max drawdown</div><div class="value" style="color:var(--red);">${fmtUSD(Math.round(trough))}</div></div>`;
+}
+
+// ---------------------------------------------------------------------------
+// AI tab
+// ---------------------------------------------------------------------------
+
+async function askAI(prompt) {
+  const panel = document.getElementById('ai-panel');
+  panel.innerHTML = '<span class="spinner"></span><span style="font-size:13px;color:var(--text2)">Analyzing...</span>';
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'x-api-key': '' },
+      body: JSON.stringify({
+        model:'claude-sonnet-4-6',
+        max_tokens:1000,
+        system:`You are a quantitative analyst specializing in prediction market arbitrage and cross-asset hedging. Be specific, use numbers, and keep responses concise and actionable. Short paragraphs, no excessive disclaimers.`,
+        messages:[{ role:'user', content:prompt }]
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+    const text = data.content?.filter(b=>b.type==='text').map(b=>b.text).join('') || 'No response received.';
+    panel.innerHTML = `<div class="ai-output">${text}</div>`;
+  } catch(e) {
+    panel.innerHTML = `<div class="result-box neg"><div class="rb-title">API error</div><div class="rb-body">${e.message}<br><br>To use AI analysis, add your Anthropic API key in the x-api-key header above (line ~350 in this file).</div></div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+
+loadAccount();
+calcHedge();
+</script>
+</body>
+</html>

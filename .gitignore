@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# Data / logs (contain trade history — commit only if you want it)
+paper_trades.jsonl
+
+# Misc
+.DS_Store
+get-pip.py
+*.egg-info/
+dist/
+build/
