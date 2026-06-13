@@ -443,6 +443,213 @@ def place_order():
 
 
 # ---------------------------------------------------------------------------
+# POST /api/trade  — size + execute a single paper trade from the dashboard
+# DATA: LIVE (Alpaca paper)  |  KEY: required
+# ---------------------------------------------------------------------------
+
+@app.route("/api/trade", methods=["POST"])
+def execute_trade():
+    """
+    Sizes and places a single paper trade directly from the dashboard.
+    Logs the trade to paper_trades.jsonl so pnl_tracker.py can track it.
+
+    Body (JSON):
+      ticker       — stock symbol (required)
+      direction    — "long" | "short" (required)
+      pm_url       — Polymarket event URL (for tagging)
+      pm_prob      — PM probability at time of trade
+      pm_volume    — PM market volume
+      event_title  — event title
+      category     — event category
+      score        — pattern score
+      edge         — estimated edge
+      size_pct     — fraction of buying power per trade (default 0.01)
+      max_usd      — hard cap on position size in dollars (default 2000)
+
+    *** PAPER TRADING ONLY — no real money ***
+    """
+    import math as _math
+    body      = request.get_json(force=True)
+    ticker    = body.get("ticker", "").upper()
+    direction = body.get("direction", "long")
+
+    if not ticker or direction not in ("long", "short"):
+        return jsonify({"error": "ticker and direction (long|short) are required"}), 400
+
+    side     = "buy" if direction == "long" else "sell"
+    size_pct = float(body.get("size_pct", 0.01))
+    max_usd  = float(body.get("max_usd", 2000.0))
+
+    # 1. Buying power
+    try:
+        acct_r = requests.get(f"{ALPACA_URL}/v2/account",
+                              headers=alpaca_headers(), timeout=10)
+        acct_r.raise_for_status()
+        buying_power = float(acct_r.json()["buying_power"])
+    except EnvironmentError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"Could not fetch account: {e}"}), 502
+
+    # 2. Current stock price
+    try:
+        price = round(float(yf.Ticker(ticker).fast_info.last_price), 2)
+    except Exception as e:
+        return jsonify({"error": f"Could not get price for {ticker}: {e}"}), 502
+
+    if price <= 0:
+        return jsonify({"error": f"Invalid price for {ticker}: {price}"}), 400
+
+    # 3. Position sizing
+    alloc_usd = min(buying_power * size_pct, max_usd)
+    qty       = _math.floor(alloc_usd / price)
+    if qty < 1:
+        return jsonify({
+            "error": f"Position too small: ${alloc_usd:.0f} / ${price:.2f} = {alloc_usd/price:.2f} shares (< 1)"
+        }), 400
+
+    actual_usd  = round(qty * price, 2)
+    pm_url      = body.get("pm_url", "")
+
+    # 4. Place Alpaca order
+    alpaca_body = {
+        "symbol":        ticker,
+        "qty":           str(qty),
+        "side":          side,
+        "type":          "market",
+        "time_in_force": "day",
+        "client_order_id": f"pm_{pm_url[-32:]}" if pm_url else None,
+    }
+    alpaca_body = {k: v for k, v in alpaca_body.items() if v is not None}
+    try:
+        order_r = requests.post(f"{ALPACA_URL}/v2/orders",
+                                headers=alpaca_headers(),
+                                json=alpaca_body, timeout=10)
+        order_r.raise_for_status()
+        order = order_r.json()
+    except EnvironmentError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"Alpaca order failed: {e}"}), 502
+
+    # 5. Log to paper_trades.jsonl
+    record = {
+        "timestamp":      ts(),
+        "action":         "trade",
+        "dry_run":        False,
+        "ticker":         ticker,
+        "side":           side,
+        "direction":      direction,
+        "qty":            qty,
+        "entry_price":    price,
+        "position_usd":   actual_usd,
+        "event_title":    body.get("event_title", ""),
+        "pm_url":         pm_url,
+        "pm_prob":        float(body.get("pm_prob", 0)),
+        "pm_volume":      float(body.get("pm_volume", 0)),
+        "category":       body.get("category", ""),
+        "edge_estimate":  float(body.get("edge", 0)),
+        "final_score":    float(body.get("score", 0)),
+        "pattern_score":  float(body.get("score", 0)),
+        "verdict":        "DASHBOARD",
+        "alpaca_order_id": order.get("id", ""),
+        "alpaca_status":   order.get("status", ""),
+        "source":         "dashboard",
+    }
+    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paper_trades.jsonl")
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
+
+    print(
+        f"\n[DASHBOARD TRADE] {'='*44}\n"
+        f"  Ticker:    {ticker}\n"
+        f"  Direction: {side.upper()}\n"
+        f"  Qty:       {qty} shares @ ${price:.2f} = ${actual_usd:,.0f}\n"
+        f"  Alpaca ID: {order.get('id')}\n"
+        f"  Status:    {order.get('status')}\n"
+        f"  Event:     {body.get('event_title','')[:60]}\n"
+        f"{'='*46}\n"
+    )
+
+    return jsonify({
+        "success":      True,
+        "source":       "Alpaca Paper Trading",
+        "submitted_at": ts(),
+        "trade": {
+            "ticker":       ticker,
+            "side":         side,
+            "direction":    direction,
+            "qty":          qty,
+            "price":        price,
+            "position_usd": actual_usd,
+        },
+        "alpaca_order": {
+            "id":     order.get("id"),
+            "status": order.get("status"),
+        },
+        "logged_to": "paper_trades.jsonl",
+    })
+
+
+# ---------------------------------------------------------------------------
+# GET /api/stock-stats/<ticker>  — fast historical stats for one ticker
+# DATA: ~15min delayed (yfinance)  |  KEY: none
+# ---------------------------------------------------------------------------
+
+@app.route("/api/stock-stats/<ticker>")
+def stock_stats(ticker: str):
+    """
+    Returns 90-day historical volatility, Sharpe ratio, and liquidity score
+    for a single ticker. Used by the dashboard "Full score" button.
+    ~2-3s response time.
+    """
+    import math as _math
+    ticker = ticker.upper()
+    days   = request.args.get("days", 90, type=int)
+    RISK_FREE = 0.053
+
+    try:
+        t    = yf.Ticker(ticker)
+        hist = t.history(period=f"{days}d")
+        info = t.fast_info
+
+        if hist.empty or len(hist) < 5:
+            return jsonify({"error": f"Not enough data for {ticker}"}), 404
+
+        closes  = hist["Close"].values
+        volumes = hist["Volume"].values
+
+        returns = [(closes[i] - closes[i-1]) / closes[i-1]
+                   for i in range(1, len(closes))]
+
+        avg_ret  = sum(returns) / len(returns)
+        variance = sum((r - avg_ret)**2 for r in returns) / len(returns)
+        daily_vol = _math.sqrt(variance)
+        ann_vol   = daily_vol * _math.sqrt(252)
+        ann_ret   = avg_ret * 252
+        sharpe    = (ann_ret - RISK_FREE) / ann_vol if ann_vol > 0 else 0
+
+        avg_dv    = sum(v * p for v, p in zip(volumes, closes)) / len(volumes)
+        liquidity = min(1.0, _math.log10(max(avg_dv, 1)) / 10)
+
+        return jsonify({
+            "ticker":       ticker,
+            "price":        round(float(closes[-1]), 2),
+            "price_52w_high": round(float(info.year_high), 2),
+            "price_52w_low":  round(float(info.year_low),  2),
+            "ann_vol":      round(ann_vol, 4),
+            "ann_ret":      round(ann_ret, 4),
+            "sharpe":       round(sharpe, 3),
+            "liquidity":    round(liquidity, 3),
+            "data_days":    len(returns),
+            "source":       "yfinance (~15min delayed)",
+            "fetched_at":   ts(),
+        })
+    except Exception as e:
+        return jsonify({"error": f"yfinance error for {ticker}: {e}"}), 502
+
+
+# ---------------------------------------------------------------------------
 # /api/scan  — run event_stock_mapper.py and return JSON opportunities
 # DATA: LIVE (PM) / ~15min delayed (stock prices)  |  KEY: none
 # ---------------------------------------------------------------------------

@@ -108,10 +108,26 @@ button { cursor: pointer; font-family: inherit; }
 .pf-table th.r, .pf-table td.r { text-align: right; }
 .pf-table td { padding: 6px 8px; border-bottom: 0.5px solid var(--border); }
 .pf-table tr:last-child td { border-bottom: none; }
+
+/* Notification badge */
+.notif-badge { display:none; position:fixed; top:16px; right:16px; z-index:999; background:var(--green); color:#fff; font-size:13px; font-weight:500; padding:10px 16px; border-radius:var(--radius); box-shadow:0 4px 16px rgba(0,0,0,0.15); cursor:pointer; max-width:320px; }
+
+/* Trade confirm panel */
+.trade-confirm { margin-top:12px; padding:12px; background:var(--bg2); border-radius:var(--radius-sm); border:0.5px solid var(--border2); }
+.trade-confirm .tc-row { display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px; }
+.trade-confirm .tc-label { color:var(--text2); }
+.trade-confirm .tc-btns { display:flex; gap:8px; margin-top:10px; }
+
+/* Auto-refresh toggle */
+.auto-btn { font-size:12px; padding:5px 12px; border-radius:var(--radius-sm); border:0.5px solid var(--border2); background:transparent; color:var(--text2); cursor:pointer; }
+.auto-btn.on { background:var(--green-bg); color:var(--green-text); border-color:var(--green); }
 </style>
 </head>
 <body>
 <div class="app">
+
+  <!-- New-opportunity notification (auto-refresh) -->
+  <div class="notif-badge" id="notif-badge" onclick="dismissNotif()"></div>
 
   <div class="header">
     <div>
@@ -121,6 +137,7 @@ button { cursor: pointer; font-family: inherit; }
     <div class="header-right">
       <span class="status-dot" id="dot"></span>
       <span class="status-text" id="status-text">Ready</span>
+      <button class="auto-btn" id="auto-btn" onclick="toggleAutoRefresh()" title="Auto-refresh scan every 5 minutes">Auto ◌</button>
       <button class="btn primary" id="scan-btn" onclick="runFullScan()">↗ Run scan</button>
     </div>
   </div>
@@ -250,9 +267,11 @@ button { cursor: pointer; font-family: inherit; }
 <script>
 const SERVER = 'http://localhost:5050';
 
-let payoffChart = null;
-let btChartObj  = null;
-let liveOpps    = [];   // current scan results
+let payoffChart   = null;
+let btChartObj    = null;
+let liveOpps      = [];      // current scan results
+let prevOppKeys   = new Set(); // for new-opportunity detection
+let autoInterval  = null;    // setInterval handle for auto-refresh
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -294,6 +313,76 @@ function setStatus(text, loading) {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-refresh
+// ---------------------------------------------------------------------------
+
+function toggleAutoRefresh() {
+  const btn = document.getElementById('auto-btn');
+  if (autoInterval) {
+    clearInterval(autoInterval);
+    autoInterval = null;
+    btn.textContent = 'Auto ◌';
+    btn.classList.remove('on');
+  } else {
+    autoInterval = setInterval(autoScan, 5 * 60 * 1000); // every 5 min
+    btn.textContent = 'Auto ●';
+    btn.classList.add('on');
+    autoScan(); // run immediately
+  }
+}
+
+async function autoScan() {
+  try {
+    const r    = await fetch(`${SERVER}/api/scan?limit=200`);
+    const data = await r.json();
+    const opps = data.opportunities || [];
+
+    // Detect new high-score entries not seen in previous scan
+    const newStrong = opps.filter(o =>
+      o.total_score >= 0.85 && !prevOppKeys.has(o.event_id + o.ticker)
+    );
+
+    prevOppKeys = new Set(opps.map(o => o.event_id + o.ticker));
+    liveOpps = opps;
+    renderEventList(opps);
+    updateMetrics(opps);
+    setStatus(`Auto: ${new Date().toLocaleTimeString()}`, false);
+
+    if (newStrong.length > 0) {
+      const n = newStrong[0];
+      showNotif(`New opportunity: ${n.ticker} — ${n.event_title.slice(0,50)}`);
+    }
+  } catch(_) {}
+}
+
+function updateMetrics(opps) {
+  document.getElementById('m-opps').textContent = opps.length;
+  if (opps.length > 0) {
+    const topScore = Math.max(...opps.map(o => o.total_score || 0));
+    document.getElementById('m-corr').textContent = topScore.toFixed(2);
+    const bestEdge = Math.max(...opps.map(o => quickEdge(o)));
+    const edgeEl = document.getElementById('m-edge');
+    edgeEl.textContent = (bestEdge >= 0 ? '+' : '') + '$' + Math.abs(bestEdge).toFixed(3);
+    edgeEl.style.color = bestEdge >= 0 ? 'var(--green)' : 'var(--red)';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+function showNotif(msg) {
+  const el = document.getElementById('notif-badge');
+  el.textContent = '🔔 ' + msg + '  ✕';
+  el.style.display = 'block';
+  setTimeout(dismissNotif, 12000);
+}
+
+function dismissNotif() {
+  document.getElementById('notif-badge').style.display = 'none';
+}
+
+// ---------------------------------------------------------------------------
 // Tab switching
 // ---------------------------------------------------------------------------
 
@@ -324,7 +413,7 @@ async function loadAccount() {
     document.getElementById('acc-bp').textContent     = fmtUSD(data.buying_power);
     document.getElementById('acc-status-wrap').innerHTML =
       `<span class="tag tag-green" style="font-size:10px;">${data.status || 'ACTIVE'}</span>`;
-  } catch(_) { /* server not running — hide silently */ }
+  } catch(_) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -338,7 +427,6 @@ async function runFullScan() {
   setStatus('Fetching live Polymarket data...', true);
 
   try {
-    // 1. Market count (fast — used for the top metric only)
     const pmResp = await fetch(`${SERVER}/api/polymarket?limit=200`);
     if (!pmResp.ok) throw new Error('server.py not reachable — is it running on port 5050?');
     const pmData = await pmResp.json();
@@ -346,25 +434,13 @@ async function runFullScan() {
 
     setStatus('Matching events to stocks...', true);
 
-    // 2. Opportunities from event_stock_mapper (~5-10s)
     const scanResp = await fetch(`${SERVER}/api/scan?limit=200`);
     const scanData = await scanResp.json();
     if (scanData.error) throw new Error(scanData.error);
 
     liveOpps = scanData.opportunities || [];
-    document.getElementById('m-opps').textContent = liveOpps.length;
-
-    if (liveOpps.length > 0) {
-      const topScore = Math.max(...liveOpps.map(o => o.total_score || 0));
-      document.getElementById('m-corr').textContent = topScore.toFixed(2);
-
-      const edges    = liveOpps.map(o => quickEdge(o));
-      const bestEdge = Math.max(...edges);
-      const edgeEl   = document.getElementById('m-edge');
-      edgeEl.textContent = (bestEdge >= 0 ? '+' : '') + '$' + Math.abs(bestEdge).toFixed(3);
-      edgeEl.style.color = bestEdge >= 0 ? 'var(--green)' : 'var(--red)';
-    }
-
+    prevOppKeys = new Set(liveOpps.map(o => o.event_id + o.ticker));
+    updateMetrics(liveOpps);
     renderEventList(liveOpps);
     setStatus(`Last scan: ${new Date().toLocaleTimeString()}`, false);
   } catch(e) {
@@ -416,14 +492,14 @@ function renderEventList(opps) {
 }
 
 // ---------------------------------------------------------------------------
-// Correlation panel
+// Correlation panel  (with Trade + Full Score buttons)
 // ---------------------------------------------------------------------------
 
 function showCorrPanel(opp) {
-  const panel   = document.getElementById('corr-panel');
-  const vol     = defaultVol(opp.ticker);
-  const edge    = quickEdge(opp);
-  const isLong  = opp.direction === 'long';
+  const panel  = document.getElementById('corr-panel');
+  const vol    = defaultVol(opp.ticker);
+  const edge   = quickEdge(opp);
+  const isLong = opp.direction === 'long';
 
   panel.innerHTML = `
     <div style="margin-bottom:12px;">
@@ -438,7 +514,8 @@ function showCorrPanel(opp) {
       <div class="metric"><div class="label">PM probability</div><div class="value">${Math.round((opp.pm_prob||0)*100)}%</div></div>
       <div class="metric"><div class="label">PM volume</div><div class="value">${fmtVol(opp.pm_volume||0)}</div></div>
       <div class="metric"><div class="label">Pattern score</div><div class="value">${(opp.total_score||0).toFixed(2)}</div></div>
-      <div class="metric"><div class="label">Est. edge</div>
+      <div class="metric" id="edge-metric">
+        <div class="label">Est. edge</div>
         <div class="value" style="color:${edge>=0?'var(--green)':'var(--red)'}">${edge>=0?'+':''}$${Math.abs(edge).toFixed(3)}</div>
       </div>
     </div>
@@ -446,13 +523,114 @@ function showCorrPanel(opp) {
       <div class="rb-title">${opp.hedge_action}</div>
       <div class="rb-body">${opp.note}</div>
     </div>
-    ${opp.pm_url ? `<div style="margin-top:8px;"><a href="${opp.pm_url}" target="_blank" rel="noopener" style="font-size:12px;color:var(--blue);">View on Polymarket →</a></div>` : ''}`;
+    ${opp.pm_url ? `<div style="margin-top:6px;"><a href="${opp.pm_url}" target="_blank" rel="noopener" style="font-size:12px;color:var(--blue);">View on Polymarket →</a></div>` : ''}
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn primary" style="flex:1;" onclick="showTradeConfirm(${JSON.stringify(opp).replace(/"/g,'&quot;')})">Trade this ↗</button>
+      <button class="btn" id="full-score-btn" onclick="loadFullScore('${opp.ticker}', this)">Full score</button>
+    </div>
+    <div id="trade-confirm-area"></div>
+    <div id="full-score-area"></div>`;
 
-  // Pre-populate hedge calculator sliders with this event's values
   document.getElementById('corr-val').value  = Math.round((opp.total_score||0.72) * 100);
   document.getElementById('asset-vol').value = Math.round(vol * 100);
   document.getElementById('pm-prob').value   = Math.round((opp.pm_prob||0.5) * 100);
   calcHedge();
+}
+
+// ---------------------------------------------------------------------------
+// Trade execution
+// ---------------------------------------------------------------------------
+
+function showTradeConfirm(opp) {
+  const area    = document.getElementById('trade-confirm-area');
+  const side    = opp.direction === 'long' ? 'BUY' : 'SELL (short)';
+  const sideCls = opp.direction === 'long' ? 'tag-green' : 'tag-red';
+  area.innerHTML = `
+    <div class="trade-confirm">
+      <div style="font-size:12px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Confirm paper trade</div>
+      <div class="tc-row"><span class="tc-label">Action</span><span class="tag ${sideCls}">${side} ${opp.ticker}</span></div>
+      <div class="tc-row"><span class="tc-label">Size</span><span>1% of buying power (max $2,000)</span></div>
+      <div class="tc-row"><span class="tc-label">Order type</span><span>Market — paper only</span></div>
+      <div class="tc-row"><span class="tc-label">PM event</span><span style="max-width:180px;text-align:right;font-size:12px;">${opp.event_title.slice(0,45)}</span></div>
+      <div class="tc-btns">
+        <button class="btn primary" style="flex:1;" id="confirm-trade-btn" onclick="executeTrade(${JSON.stringify(opp).replace(/"/g,'&quot;')})">Confirm</button>
+        <button class="btn" onclick="document.getElementById('trade-confirm-area').innerHTML=''">Cancel</button>
+      </div>
+    </div>`;
+}
+
+async function executeTrade(opp) {
+  const btn = document.getElementById('confirm-trade-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Placing...';
+  const area = document.getElementById('trade-confirm-area');
+  try {
+    const r = await fetch(`${SERVER}/api/trade`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ticker:      opp.ticker,
+        direction:   opp.direction,
+        pm_url:      opp.pm_url,
+        pm_prob:     opp.pm_prob,
+        pm_volume:   opp.pm_volume,
+        event_title: opp.event_title,
+        category:    opp.category,
+        score:       opp.total_score,
+        edge:        quickEdge(opp),
+      }),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    const t = data.trade;
+    area.innerHTML = `
+      <div class="result-box pos" style="margin-top:10px;">
+        <div class="rb-title">Order placed ✓</div>
+        <div class="rb-body">
+          ${t.side.toUpperCase()} ${t.qty} ${t.ticker} @ ~${fmtUSD(t.price,2)} ≈ ${fmtUSD(t.position_usd)}<br>
+          Alpaca ID: ${data.alpaca_order.id}<br>
+          Status: ${data.alpaca_order.status}
+        </div>
+      </div>`;
+    loadAccount(); // refresh buying power
+  } catch(e) {
+    area.innerHTML = `<div class="result-box neg" style="margin-top:10px;"><div class="rb-title">Trade failed</div><div class="rb-body">${e.message}</div></div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Full score (historical stats on demand)
+// ---------------------------------------------------------------------------
+
+async function loadFullScore(ticker, btn) {
+  const area = document.getElementById('full-score-area');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+  area.innerHTML = '';
+  try {
+    const r    = await fetch(`${SERVER}/api/stock-stats/${ticker}`);
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    const sharpeColor = data.sharpe >= 1 ? 'var(--green)' : data.sharpe >= 0 ? 'var(--text)' : 'var(--red)';
+    area.innerHTML = `
+      <div style="margin-top:12px;padding-top:12px;border-top:0.5px solid var(--border);">
+        <div class="section-label" style="margin-bottom:8px;">90-day Historical Stats — ${ticker}</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+          <div class="metric"><div class="label">Ann. volatility</div><div class="value">${(data.ann_vol*100).toFixed(1)}%</div></div>
+          <div class="metric"><div class="label">Sharpe ratio</div><div class="value" style="color:${sharpeColor}">${data.sharpe.toFixed(2)}</div></div>
+          <div class="metric"><div class="label">Liquidity</div><div class="value">${data.liquidity.toFixed(2)}</div></div>
+          <div class="metric"><div class="label">Price now</div><div class="value">${fmtUSD(data.price,2)}</div></div>
+          <div class="metric"><div class="label">52w high</div><div class="value">${fmtUSD(data.price_52w_high,2)}</div></div>
+          <div class="metric"><div class="label">52w low</div><div class="value">${fmtUSD(data.price_52w_low,2)}</div></div>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px;">${data.source} · ${data.data_days} trading days</div>
+      </div>`;
+  } catch(e) {
+    area.innerHTML = `<div style="color:var(--red);font-size:13px;margin-top:8px;">Stats error: ${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Full score';
+  }
 }
 
 // ---------------------------------------------------------------------------
