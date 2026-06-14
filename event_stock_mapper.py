@@ -38,7 +38,7 @@ from typing import Optional
 
 import requests
 
-SERVER = "http://localhost:5050"
+POLY_GAMMA = "https://gamma-api.polymarket.com"
 
 # ---------------------------------------------------------------------------
 # Pattern ruleset
@@ -527,17 +527,61 @@ def match_event(event: dict) -> Optional[Opportunity]:
 # ---------------------------------------------------------------------------
 
 def fetch_events(limit: int = 200) -> list[dict]:
-    """Fetch live Polymarket events from the local server."""
+    """Fetch live Polymarket markets directly from the Gamma API."""
+    import json as _json
+    raw, offset = [], 0
     try:
-        r = requests.get(f"{SERVER}/api/polymarket", params={"limit": limit}, timeout=15)
-        r.raise_for_status()
-        data = r.json()
-        print(f"[polymarket] {data['count']} live markets fetched  ← LIVE DATA", file=__import__("sys").stderr)
-        return data.get("markets", [])
+        while len(raw) < limit:
+            batch_size = min(100, limit - len(raw))
+            r = requests.get(
+                f"{POLY_GAMMA}/markets",
+                params={"active": "true", "closed": "false",
+                        "limit": batch_size, "offset": offset},
+                timeout=15,
+            )
+            r.raise_for_status()
+            batch = r.json()
+            if not batch:
+                break
+            raw.extend(batch)
+            offset += len(batch)
+            if len(batch) < batch_size:
+                break
     except Exception as e:
-        print(f"[error] Could not reach server.py: {e}", file=sys.stderr)
-        print(f"        Is server.py running? Try: python3 server.py", file=sys.stderr)
+        print(f"[error] Could not reach Polymarket API: {e}", file=sys.stderr)
         sys.exit(1)
+
+    markets = []
+    for m in raw:
+        title = (m.get("question") or "").strip()
+        if not title:
+            continue
+        try:
+            prices   = _json.loads(m.get("outcomePrices") or "[]")
+            outcomes = _json.loads(m.get("outcomes")      or "[]")
+        except Exception:
+            continue
+        if len(prices) != 2 or len(outcomes) != 2:
+            continue
+        try:
+            yes_idx = [o.lower() for o in outcomes].index("yes")
+        except ValueError:
+            yes_idx = 0
+        yes_price = float(prices[yes_idx])
+        if yes_price <= 0:
+            continue
+        slug = m.get("slug") or m.get("id", "")
+        markets.append({
+            "id":       m.get("conditionId") or m.get("id"),
+            "title":    title,
+            "prob":     round(yes_price, 4),
+            "volume":   float(m.get("volumeNum") or 0),
+            "url":      f"https://polymarket.com/event/{slug}",
+            "end_date": m.get("endDate", ""),
+        })
+
+    print(f"[polymarket] {len(markets)} live markets fetched  ← LIVE DATA", file=sys.stderr)
+    return markets
 
 
 def scan(min_vol: float = 0, limit: int = 200) -> list[Opportunity]:
