@@ -584,12 +584,22 @@ def fetch_events(limit: int = 200) -> list[dict]:
     return markets
 
 
-def scan(min_vol: float = 0, limit: int = 200) -> list[Opportunity]:
-    """Fetch events, match them, return sorted opportunities."""
+def scan(min_vol: float = 0, limit: int = 200,
+         min_prob: float = 0.05, max_prob: float = 0.95) -> list[Opportunity]:
+    """
+    Fetch events, match them, return one opportunity per ticker (best score).
+    Filters:
+      min_vol  — skip low-liquidity markets
+      min_prob / max_prob — skip near-certain outcomes (e.g. 1% or 99%)
+                            Good hedges live in the uncertainty zone (5-95%)
+    """
     events = fetch_events(limit)
     opps = []
     for ev in events:
         if ev.get("volume", 0) < min_vol:
+            continue
+        prob = ev.get("prob", 0.5)
+        if not (min_prob <= prob <= max_prob):
             continue
         opp = match_event(ev)
         if opp:
@@ -597,7 +607,18 @@ def scan(min_vol: float = 0, limit: int = 200) -> list[Opportunity]:
 
     # Sort by total_score descending
     opps.sort(key=lambda o: o.total_score, reverse=True)
-    return opps
+
+    # Deduplicate: keep only the best opportunity per ticker
+    seen = {}
+    for opp in opps:
+        if opp.ticker not in seen:
+            seen[opp.ticker] = opp
+    deduped = list(seen.values())
+    deduped.sort(key=lambda o: o.total_score, reverse=True)
+
+    print(f"[scan] {len(opps)} raw matches → {len(deduped)} unique tickers after dedup/filter",
+          file=__import__("sys").stderr)
+    return deduped
 
 
 # ---------------------------------------------------------------------------
