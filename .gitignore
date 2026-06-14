@@ -10,6 +10,8 @@ __pycache__/
 
 # Data / logs (contain trade history — commit only if you want it)
 paper_trades.jsonl
+*.db
+*.db-journal
 
 # Misc
 .DS_Store

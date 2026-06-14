@@ -33,9 +33,10 @@ from datetime import datetime, timezone
 import requests
 import yfinance as yf
 
-SERVER      = "http://localhost:5050"
-TRADES_LOG  = "paper_trades.jsonl"
-POLY_GAMMA  = "https://gamma-api.polymarket.com"
+import db as _db
+
+SERVER     = "http://localhost:5050"
+POLY_GAMMA = "https://gamma-api.polymarket.com"
 
 session = requests.Session()
 session.headers.update({"User-Agent": "hedge-dashboard-closer/0.1"})
@@ -49,42 +50,8 @@ def ts() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def load_open_trades(log_path: str) -> list[dict]:
-    """
-    Returns trades that are currently open (opened but not yet closed).
-    A trade is 'closed' if there's a matching close record with the same
-    alpaca_order_id or (ticker + timestamp).
-    """
-    trades = []
-    closed_ids = set()
-
-    try:
-        with open(log_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    r = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if r.get("action") == "close":
-                    ref = r.get("closes_order_id") or r.get("ticker") + r.get("open_timestamp","")
-                    closed_ids.add(ref)
-                elif r.get("action") == "trade" and not r.get("dry_run"):
-                    trades.append(r)
-    except FileNotFoundError:
-        print(f"[error] {log_path} not found — no trades to close.", file=sys.stderr)
-        sys.exit(1)
-
-    # Filter out trades that are already closed
-    open_trades = []
-    for t in trades:
-        ref = t.get("alpaca_order_id") or t["ticker"] + t.get("timestamp","")
-        if ref not in closed_ids:
-            open_trades.append(t)
-
-    return open_trades
+def load_open_trades(log_path: str = None) -> list[dict]:
+    return _db.get_open_trades(include_dry_runs=False)
 
 
 def check_pm_resolution(pm_url: str) -> str:
@@ -164,9 +131,8 @@ def close_on_alpaca(ticker: str, qty: int, side: str, open_order_id: str,
         return None
 
 
-def log_close(record: dict, log_path: str):
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
+def log_close(record: dict, log_path: str = None):
+    _db.log_trade(record)
 
 
 # ---------------------------------------------------------------------------
@@ -175,19 +141,18 @@ def log_close(record: dict, log_path: str):
 
 def run(args):
     dry_run = not args.execute
-    log_path = args.log
 
     if dry_run:
         print(f"\n{'='*60}")
         print(f"  DRY RUN — pass --execute to actually close positions")
         print(f"{'='*60}\n")
 
-    open_trades = load_open_trades(log_path)
+    open_trades = load_open_trades()
 
     if args.ticker:
         open_trades = [t for t in open_trades if t["ticker"].upper() == args.ticker.upper()]
 
-    print(f"[closer] {len(open_trades)} open trade(s) found in {log_path}")
+    print(f"[closer] {len(open_trades)} open trade(s) found in {_db.DB_PATH}")
 
     if not open_trades:
         print("[closer] Nothing to close.")
@@ -264,7 +229,7 @@ def run(args):
             "alpaca_close_id":  order.get("id", ""),
             "alpaca_status":    order.get("status", ""),
         }
-        log_close(close_record, log_path)
+        log_close(close_record)
 
         total_realized += realized_pnl
         closed_count += 1
@@ -277,7 +242,7 @@ def run(args):
     print(f"  Skipped (pending): {skipped_count}")
     pnl_color = "+" if total_realized >= 0 else ""
     print(f"  Realized P&L:      {pnl_color}${total_realized:.2f}")
-    print(f"  Log file:          {log_path}")
+    print(f"  DB:                {_db.DB_PATH}")
     if dry_run:
         print(f"\n  Run with --execute to actually close positions.")
     print(f"{'='*60}\n")
@@ -295,8 +260,8 @@ def main():
                     help="Close ALL open positions regardless of PM resolution")
     ap.add_argument("--ticker", type=str, default=None,
                     help="Only close positions for a specific ticker")
-    ap.add_argument("--log",    default=TRADES_LOG,
-                    help=f"Path to trade log (default: {TRADES_LOG})")
+    ap.add_argument("--log",    default=None,
+                    help="Ignored (kept for backwards compatibility)")
     args = ap.parse_args()
     run(args)
 

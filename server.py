@@ -21,21 +21,25 @@ Data freshness:
 
 import os
 import json
+import secrets
 import subprocess
 import sys
 import time
 import requests
 import yfinance as yf
 
-from datetime import datetime, timezone
-from flask import Flask, jsonify, request
+from datetime import datetime, timedelta, timezone
+from functools import wraps
+from flask import Flask, jsonify, redirect, request, send_from_directory, session
 from flask_cors import CORS
 from dotenv import load_dotenv
+
+import db as _db
 
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)  # allow the HTML frontend to call this from file:// or localhost
+CORS(app, supports_credentials=True)
 
 # ---------------------------------------------------------------------------
 # Config — all keys from .env, never hardcoded
@@ -50,8 +54,85 @@ COINGECKO     = "https://api.coingecko.com/api/v3"
 
 PORT = int(os.getenv("FLASK_PORT", 5050))
 
-session = requests.Session()
-session.headers.update({"User-Agent": "hedge-dashboard/0.1"})
+# Auth — set DASHBOARD_SECRET in .env to require a password
+DASHBOARD_SECRET = os.getenv("DASHBOARD_SECRET")
+app.secret_key   = os.getenv("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.permanent_session_lifetime = timedelta(days=7)
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+http = requests.Session()
+http.headers.update({"User-Agent": "hedge-dashboard/0.1"})
+
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+@app.before_request
+def _check_auth():
+    """If DASHBOARD_SECRET is set, require a login session for every route."""
+    if not DASHBOARD_SECRET:
+        return  # auth disabled in dev
+    allowed = {"/login", "/logout", "/api/health"}
+    if request.path in allowed:
+        return
+    if not session.get("auth"):
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Unauthorized — visit /login"}), 401
+        return redirect("/login")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = ""
+    if request.method == "POST":
+        if request.form.get("secret") == DASHBOARD_SECRET:
+            session.permanent = True
+            session["auth"] = True
+            return redirect("/")
+        error = "Wrong password."
+    return f"""<!DOCTYPE html>
+<html><head><title>Hedge Dashboard</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+       background:#f0f0ed;display:flex;align-items:center;justify-content:center;height:100vh}}
+  .card{{background:#fff;border:0.5px solid rgba(0,0,0,.12);border-radius:12px;
+         padding:2rem;width:300px;box-shadow:0 2px 12px rgba(0,0,0,.06)}}
+  h2{{font-size:15px;font-weight:600;color:#1a1a18;margin-bottom:1.4rem}}
+  input{{width:100%;padding:9px 11px;border:0.5px solid rgba(0,0,0,.22);
+         border-radius:7px;font-size:14px;margin-bottom:10px;outline:none}}
+  input:focus{{border-color:#185FA5}}
+  button{{width:100%;padding:9px;background:#185FA5;color:#fff;border:none;
+          border-radius:7px;font-size:14px;cursor:pointer;font-weight:500}}
+  button:hover{{background:#1450a0}}
+  .err{{color:#D85A30;font-size:13px;margin-bottom:8px}}
+</style></head>
+<body><div class="card">
+  <h2>Hedge Dashboard</h2>
+  {'<p class="err">'+error+'</p>' if error else ''}
+  <form method="POST">
+    <input type="password" name="secret" placeholder="Password" autofocus autocomplete="current-password">
+    <button type="submit">Enter</button>
+  </form>
+</div></body></html>"""
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
+# ---------------------------------------------------------------------------
+# Dashboard HTML
+# ---------------------------------------------------------------------------
+
+@app.route("/")
+def dashboard():
+    return send_from_directory(_HERE, "hedge_dashboard.html")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -98,7 +179,7 @@ def polymarket():
         params = {"active": "true", "closed": "false",
                   "limit": batch_size, "offset": offset}
         try:
-            r = session.get(f"{POLY_GAMMA}/markets", params=params, timeout=15)
+            r = http.get(f"{POLY_GAMMA}/markets", params=params, timeout=15)
             r.raise_for_status()
             batch = r.json()
         except Exception as e:
@@ -172,7 +253,7 @@ def prices():
 
     # --- Crypto via CoinGecko (LIVE, free) ---
     try:
-        r = session.get(
+        r = http.get(
             f"{COINGECKO}/simple/price",
             params={"ids": "bitcoin,ethereum", "vs_currencies": "usd",
                     "include_24hr_change": "true"},
@@ -532,7 +613,7 @@ def execute_trade():
     except Exception as e:
         return jsonify({"error": f"Alpaca order failed: {e}"}), 502
 
-    # 5. Log to paper_trades.jsonl
+    # 5. Log to SQLite
     record = {
         "timestamp":      ts(),
         "action":         "trade",
@@ -556,9 +637,7 @@ def execute_trade():
         "alpaca_status":   order.get("status", ""),
         "source":         "dashboard",
     }
-    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paper_trades.jsonl")
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
+    _db.log_trade(record)
 
     print(
         f"\n[DASHBOARD TRADE] {'='*44}\n"
@@ -587,7 +666,7 @@ def execute_trade():
             "id":     order.get("id"),
             "status": order.get("status"),
         },
-        "logged_to": "paper_trades.jsonl",
+        "logged_to": "paper_trades.db",
     })
 
 
@@ -728,6 +807,23 @@ def pnl_report():
 
 
 # ---------------------------------------------------------------------------
+# /api/trades  — trade history from SQLite
+# ---------------------------------------------------------------------------
+
+@app.route("/api/trades")
+def trade_history():
+    include_dry = request.args.get("include_dry_runs", "false").lower() == "true"
+    action      = request.args.get("action")  # optional: "trade" or "close"
+    trades = _db.get_trades(include_dry_runs=include_dry, action=action or None)
+    return jsonify({
+        "source":     "paper_trades.db",
+        "fetched_at": ts(),
+        "count":      len(trades),
+        "trades":     trades,
+    })
+
+
+# ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
 
@@ -746,25 +842,28 @@ def health():
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    _db.init_db()
     print(f"""
 ╔══════════════════════════════════════════════╗
 ║       Hedge Dashboard Backend                ║
 ╠══════════════════════════════════════════════╣
+║  http://localhost:{PORT}/                     ║
 ║  http://localhost:{PORT}/api/health           ║
 ║  http://localhost:{PORT}/api/polymarket       ║
-║  http://localhost:{PORT}/api/prices           ║
 ║  http://localhost:{PORT}/api/account          ║
-║  http://localhost:{PORT}/api/positions        ║
+║  http://localhost:{PORT}/api/trades           ║
 ╠══════════════════════════════════════════════╣
 ║  DATA FLAGS                                  ║
 ║  ✓ Polymarket  — LIVE (no key)               ║
 ║  ✓ CoinGecko   — LIVE (no key)               ║
 ║  ~ yfinance    — ~15min delayed (no key)     ║
 ║  ✓ Alpaca      — LIVE paper (key required)   ║
+╠══════════════════════════════════════════════╣
+║  AUTH: {'ENABLED (DASHBOARD_SECRET set)  ' if DASHBOARD_SECRET else 'DISABLED (no DASHBOARD_SECRET)'}║
 ╚══════════════════════════════════════════════╝
 """)
     if not ALPACA_KEY:
         print("⚠  WARNING: ALPACA_API_KEY not set in .env")
         print("   /api/account and /api/order endpoints will fail.\n")
 
-    app.run(host="0.0.0.0", port=PORT, debug=True)
+    app.run(host="0.0.0.0", port=PORT, debug=os.getenv("FLASK_DEBUG", "0") == "1")

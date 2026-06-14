@@ -39,9 +39,10 @@ from typing import Optional
 
 import requests
 
+import db as _db
+
 SERVER   = "http://localhost:5050"
 POLY_GAMMA = "https://gamma-api.polymarket.com"
-TRADES_LOG = "paper_trades.jsonl"
 
 session = requests.Session()
 session.headers.update({"User-Agent": "hedge-dashboard-tracker/0.1"})
@@ -93,28 +94,8 @@ class TradeResult:
 # Data fetchers
 # ---------------------------------------------------------------------------
 
-def load_trades(log_path: str, include_dry_runs: bool) -> list[dict]:
-    trades = []
-    try:
-        with open(log_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if record.get("action") != "trade":
-                    continue
-                if record.get("dry_run") and not include_dry_runs:
-                    continue
-                trades.append(record)
-    except FileNotFoundError:
-        print(f"[error] Trade log not found: {log_path}", file=sys.stderr)
-        print(f"        Run paper_trader.py first to generate trades.", file=sys.stderr)
-        sys.exit(1)
-    return trades
+def load_trades(log_path: str = None, include_dry_runs: bool = False) -> list[dict]:
+    return _db.get_trades(include_dry_runs=include_dry_runs, action="trade")
 
 
 def fetch_alpaca_positions() -> dict[str, dict]:
@@ -412,21 +393,21 @@ def print_report(results: list[TradeResult]):
 
 def main():
     ap = argparse.ArgumentParser(description="Track P&L for paper hedge trades")
-    ap.add_argument("--log",              default=TRADES_LOG,
-                    help=f"Path to trade log (default: {TRADES_LOG})")
+    ap.add_argument("--log",              default=None,
+                    help="Ignored (kept for backwards compatibility)")
     ap.add_argument("--json",             action="store_true",
                     help="Output as JSON")
     ap.add_argument("--include-dry-runs", action="store_true",
                     help="Include dry-run trades in the report")
     args = ap.parse_args()
 
-    trades  = load_trades(args.log, args.include_dry_runs)
+    trades = load_trades(include_dry_runs=args.include_dry_runs)
     if not trades:
-        print(f"[tracker] No real trades found in {args.log}.")
+        print(f"[tracker] No real trades found in {_db.DB_PATH}.")
         print(f"          Run: python paper_trader.py --execute")
         return
 
-    print(f"[tracker] Tracking {len(trades)} trades from {args.log}...", file=sys.stderr)
+    print(f"[tracker] Tracking {len(trades)} trades from {_db.DB_PATH}...", file=sys.stderr)
     results = track(trades)
 
     if args.json:

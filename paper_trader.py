@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 import requests
 
 SERVER = "http://localhost:5050"
-TRADES_LOG = "paper_trades.jsonl"
+import db as _db
 
 # Verdicts that qualify for auto-trading (in order of confidence)
 TRADEABLE_VERDICTS = {"STRONG ✅", "MODERATE ⚠️"}
@@ -119,9 +119,7 @@ def place_order(ticker: str, side: str, qty: int, opp: dict, dry_run: bool) -> d
 
 
 def log_trade(record: dict):
-    """Append one JSON line to paper_trades.jsonl."""
-    with open(TRADES_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
+    _db.log_trade(record)
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +287,7 @@ def run(args):
     print(f"{'='*60}")
     print(f"  Trades placed:  {traded}")
     print(f"  Skipped:        {skipped}")
-    print(f"  Log file:       {TRADES_LOG}")
+    print(f"  DB:             {_db.DB_PATH}")
     if dry_run:
         print(f"\n  Run with --execute to place real paper orders.")
     print(f"{'='*60}\n")
