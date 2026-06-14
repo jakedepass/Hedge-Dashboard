@@ -444,6 +444,164 @@ RULES = [
         "category": "Musk / DOGE",
         "note": "Musk government influence can lift TSLA sentiment",
     },
+
+    # ── Fed / Interest Rates ───────────────────────────────────────────────
+    {
+        "patterns": [r"fed.{0,30}(rate cut|cut rate|lower rate|rate reduc)",
+                     r"(rate cut|cut rate).{0,30}(fed|fomc|federal reserve)",
+                     r"fomc.{0,30}(cut|lower|reduc)"],
+        "ticker": "TLT",
+        "direction": "long",
+        "confidence": 0.88,
+        "category": "Fed Rate Cut",
+        "note": "Rate cuts push bond prices up (TLT = 20yr Treasury ETF)",
+    },
+    {
+        "patterns": [r"(no|zero|without).{0,20}(fed|fomc).{0,20}(rate cut|cut)",
+                     r"(fed|fomc).{0,30}(hold|pause|no cut|unchanged)",
+                     r"no.{0,10}(rate cut|fed cut).{0,30}(2025|2026)"],
+        "ticker": "XLF",
+        "direction": "long",
+        "confidence": 0.82,
+        "category": "Fed Hold / No Cut",
+        "note": "Higher-for-longer rates benefit bank NIM (XLF = financials ETF)",
+    },
+    {
+        "patterns": [r"(fed|fomc).{0,30}(rate hike|hike rate|raise rate|rate increas)",
+                     r"(rate hike|raise rate).{0,30}(fed|fomc)"],
+        "ticker": "KRE",
+        "direction": "long",
+        "confidence": 0.78,
+        "category": "Fed Rate Hike",
+        "note": "Rate hikes boost regional bank net interest margins (KRE)",
+    },
+    {
+        "patterns": [r"(25bp|50bp|75bp|100bp).{0,30}(cut|hike)",
+                     r"fed.{0,20}(25|50|75|100).{0,10}(basis|bps|bp)"],
+        "ticker": "TLT",
+        "direction": "long",
+        "confidence": 0.80,
+        "category": "Fed Basis Points",
+        "note": "Specific Fed move size directly impacts bond prices (TLT)",
+    },
+
+    # ── FIFA World Cup 2026 ────────────────────────────────────────────────
+    {
+        "patterns": [r"(france|french).{0,30}(win|champion|world cup|fifa)",
+                     r"(world cup|fifa).{0,30}france"],
+        "ticker": "EWQ",
+        "direction": "long",
+        "confidence": 0.72,
+        "category": "FIFA / France",
+        "note": "France World Cup win lifts French equities sentiment (EWQ)",
+    },
+    {
+        "patterns": [r"(spain|spanish).{0,30}(win|champion|world cup|fifa)",
+                     r"(world cup|fifa).{0,30}spain"],
+        "ticker": "EWP",
+        "direction": "long",
+        "confidence": 0.70,
+        "category": "FIFA / Spain",
+        "note": "Spain win lifts Spanish equities (EWP = iShares Spain ETF)",
+    },
+    {
+        "patterns": [r"(brazil|brasil).{0,30}(win|champion|world cup|fifa)",
+                     r"(world cup|fifa).{0,30}braz"],
+        "ticker": "EWZ",
+        "direction": "long",
+        "confidence": 0.73,
+        "category": "FIFA / Brazil",
+        "note": "Brazil win is strong sentiment boost for EWZ (Brazil ETF)",
+    },
+    {
+        "patterns": [r"(germany|german|deutschland).{0,30}(win|champion|world cup|fifa)",
+                     r"(world cup|fifa).{0,30}(germany|german)"],
+        "ticker": "EWG",
+        "direction": "long",
+        "confidence": 0.70,
+        "category": "FIFA / Germany",
+        "note": "Germany win lifts German equities (EWG = iShares Germany ETF)",
+    },
+    {
+        "patterns": [r"(argentina|argentine).{0,30}(win|champion|world cup|fifa)",
+                     r"(world cup|fifa).{0,30}argentina"],
+        "ticker": "ARGT",
+        "direction": "long",
+        "confidence": 0.71,
+        "category": "FIFA / Argentina",
+        "note": "Argentina win lifts Argentine equities (ARGT ETF)",
+    },
+    {
+        "patterns": [r"(england|uk|britain|british).{0,30}(win|champion|world cup|fifa)",
+                     r"(world cup|fifa).{0,30}(england|britain)"],
+        "ticker": "EWU",
+        "direction": "long",
+        "confidence": 0.68,
+        "category": "FIFA / England",
+        "note": "England win boosts UK equities sentiment (EWU)",
+    },
+
+    # ── Brazil / LatAm Politics ────────────────────────────────────────────
+    {
+        "patterns": [r"(bolsonaro|lula).{0,30}(win|elect|president|brazil)",
+                     r"brazil.{0,30}(election|president|bolsonaro|lula)"],
+        "ticker": "EWZ",
+        "direction": "long",
+        "confidence": 0.75,
+        "category": "Brazil Election",
+        "note": "Brazilian presidential outcomes move EWZ (Brazil ETF) significantly",
+    },
+
+    # ── UK Politics ────────────────────────────────────────────────────────
+    {
+        "patterns": [r"(starmer|labour).{0,30}(resign|out|remov|step down|no.confidence)",
+                     r"(uk|britain).{0,20}(prime minister|pm).{0,30}(resign|out|remov)"],
+        "ticker": "EWU",
+        "direction": "short",
+        "confidence": 0.68,
+        "category": "UK Political Risk",
+        "note": "UK PM instability typically pressures sterling and UK equities (EWU)",
+    },
+
+    # ── Bitcoin / Crypto ───────────────────────────────────────────────────
+    {
+        "patterns": [r"bitcoin.{0,20}(hit|reach|above|over|exceed).{0,20}\$?(1m|1 million|1,000,000)",
+                     r"\$?1.?million.{0,20}bitcoin"],
+        "ticker": "MSTR",
+        "direction": "long",
+        "confidence": 0.78,
+        "category": "Bitcoin ATH",
+        "note": "Bitcoin breakouts are amplified in MSTR (levered BTC proxy)",
+    },
+    {
+        "patterns": [r"bitcoin.{0,20}(hit|reach|above|over).{0,20}\$?(200k|250k|300k|500k)",
+                     r"\$?(200,000|250,000|300,000).{0,20}bitcoin"],
+        "ticker": "IBIT",
+        "direction": "long",
+        "confidence": 0.80,
+        "category": "Bitcoin Price Target",
+        "note": "Bitcoin spot ETF IBIT directly tracks BTC price",
+    },
+
+    # ── NBA / Sports with ETF proxy ────────────────────────────────────────
+    {
+        "patterns": [r"(knicks|new york knicks).{0,30}(win|nba|finals|champion)",
+                     r"(nba.{0,20}finals|champion).{0,30}(knicks|new york)"],
+        "ticker": "MSG",
+        "direction": "long",
+        "confidence": 0.72,
+        "category": "NBA / Knicks",
+        "note": "Knicks championship run directly lifts MSG Sports (owner of team)",
+    },
+    {
+        "patterns": [r"(spurs|san antonio).{0,30}(win|nba|finals|champion)",
+                     r"(nba.{0,20}finals|champion).{0,30}(spurs|san antonio)"],
+        "ticker": "CHDN",
+        "direction": "long",
+        "confidence": 0.52,
+        "category": "NBA / Sports betting",
+        "note": "Major sports events boost sports-betting stocks (CHDN = Churchill Downs)",
+    },
 ]
 
 
@@ -526,7 +684,7 @@ def match_event(event: dict) -> Optional[Opportunity]:
 # Fetch + scan
 # ---------------------------------------------------------------------------
 
-def fetch_events(limit: int = 200) -> list[dict]:
+def fetch_events(limit: int = 500) -> list[dict]:
     """Fetch live Polymarket markets directly from the Gamma API."""
     import json as _json
     raw, offset = [], 0
@@ -584,7 +742,7 @@ def fetch_events(limit: int = 200) -> list[dict]:
     return markets
 
 
-def scan(min_vol: float = 0, limit: int = 200,
+def scan(min_vol: float = 0, limit: int = 500,
          min_prob: float = 0.05, max_prob: float = 0.95) -> list[Opportunity]:
     """
     Fetch events, match them, return one opportunity per ticker (best score).

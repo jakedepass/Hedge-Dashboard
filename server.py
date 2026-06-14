@@ -743,13 +743,13 @@ def scan_opportunities():
     Takes ~5-10s (fetches live PM data).
     """
     min_vol = request.args.get("min_vol", 0, type=float)
-    limit   = request.args.get("limit",  200, type=int)
+    limit   = request.args.get("limit",  500, type=int)
     script  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "event_stock_mapper.py")
     try:
         result = subprocess.run(
             [sys.executable, script, "--json",
              "--limit", str(limit), "--min-vol", str(min_vol)],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=90,
         )
         if not result.stdout.strip():
             return jsonify({"error": "mapper returned no output",
