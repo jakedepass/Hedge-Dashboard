@@ -36,14 +36,33 @@ Data:
 import argparse
 import json
 import math
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
 
 import requests
+import yfinance as yf
+from dotenv import load_dotenv
 
-SERVER = "http://localhost:5050"
 import db as _db
+
+load_dotenv()
+
+ALPACA_KEY    = os.getenv("ALPACA_API_KEY")
+ALPACA_SECRET = os.getenv("ALPACA_SECRET_KEY")
+ALPACA_URL    = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+
+
+def _alpaca_headers() -> dict:
+    if not ALPACA_KEY or not ALPACA_SECRET:
+        print("[error] ALPACA_API_KEY / ALPACA_SECRET_KEY not set in .env", file=sys.stderr)
+        sys.exit(1)
+    return {
+        "APCA-API-KEY-ID":     ALPACA_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET,
+        "Content-Type":        "application/json",
+    }
 
 # Verdicts that qualify for auto-trading (in order of confidence)
 TRADEABLE_VERDICTS = {"STRONG ✅", "MODERATE ⚠️"}
@@ -62,57 +81,52 @@ def ts() -> str:
 
 def get_account() -> dict:
     try:
-        r = requests.get(f"{SERVER}/api/account", timeout=10)
+        r = requests.get(f"{ALPACA_URL}/v2/account", headers=_alpaca_headers(), timeout=10)
         r.raise_for_status()
-        return r.json()
+        a = r.json()
+        return {"buying_power": float(a["buying_power"]), "equity": float(a["equity"])}
     except Exception as e:
-        print(f"[error] Could not fetch account from server.py: {e}", file=sys.stderr)
-        print(f"        Is server.py running?", file=sys.stderr)
+        print(f"[error] Could not fetch Alpaca account: {e}", file=sys.stderr)
         sys.exit(1)
 
 
 def get_positions() -> list[dict]:
     try:
-        r = requests.get(f"{SERVER}/api/positions", timeout=10)
+        r = requests.get(f"{ALPACA_URL}/v2/positions", headers=_alpaca_headers(), timeout=10)
         r.raise_for_status()
-        return r.json().get("positions", [])
+        return [{"ticker": p["symbol"], "side": p["side"]} for p in r.json()]
     except Exception as e:
-        print(f"[error] Could not fetch positions: {e}", file=sys.stderr)
+        print(f"[error] Could not fetch Alpaca positions: {e}", file=sys.stderr)
         sys.exit(1)
 
 
 def get_stock_price(ticker: str) -> float | None:
     try:
-        r = requests.get(f"{SERVER}/api/stock/{ticker}", timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        if "error" in data:
-            print(f"  [warn] price error for {ticker}: {data['error']}", file=sys.stderr)
-            return None
-        return float(data["price"])
+        return round(float(yf.Ticker(ticker).fast_info.last_price), 2)
     except Exception as e:
         print(f"  [warn] Could not get price for {ticker}: {e}", file=sys.stderr)
         return None
 
 
 def place_order(ticker: str, side: str, qty: int, opp: dict, dry_run: bool) -> dict | None:
-    """Place an order via server.py. Returns Alpaca order dict or None on error."""
-    payload = {
-        "ticker":      ticker,
-        "side":        side,
-        "qty":         qty,
-        "order_type":  "market",
-        "pm_contract": opp.get("pm_url", "")[:36],
-        "edge":        opp.get("edge_estimate"),
-        "note":        f"auto-hedge: {opp.get('category', '')} | score={opp.get('final_score', 0):.3f}",
-    }
     if dry_run:
         return {"status": "dry_run", "id": "dry_run"}
+    pm_url = opp.get("pm_url", "")
+    body = {
+        "symbol":        ticker,
+        "qty":           str(qty),
+        "side":          side,
+        "type":          "market",
+        "time_in_force": "day",
+        "client_order_id": f"pm_{pm_url[-32:]}" if pm_url else None,
+    }
+    body = {k: v for k, v in body.items() if v is not None}
     try:
-        r = requests.post(f"{SERVER}/api/order", json=payload, timeout=15)
+        r = requests.post(f"{ALPACA_URL}/v2/orders", headers=_alpaca_headers(),
+                          json=body, timeout=15)
         r.raise_for_status()
-        resp = r.json()
-        return resp.get("alpaca_order", {})
+        order = r.json()
+        return {"id": order.get("id"), "status": order.get("status")}
     except Exception as e:
         print(f"  [error] Order failed for {ticker}: {e}", file=sys.stderr)
         return None
